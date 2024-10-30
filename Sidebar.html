@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 12px;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: calc(100vh - 24px);
+        }
+
+        .input-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .output-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 16px;
+            border-top: 1px solid #eee;
+            padding-top: 16px;
+        }
+
+        label {
+            font-weight: 500;
+            color: #444;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            flex: 1;
+        }
+
+        button:hover {
+            background-color: #3574e2;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background-color: #fff;
+            color: #4285f4;
+            border: 1px solid #4285f4;
+        }
+
+        button.secondary:hover {
+            background-color: #f8f9fa;
+        }
+
+        #output {
+            flex: 1;
+            white-space: pre-wrap;
+            background-color: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-y: auto;
+            font-size: 14px;
+            border: 1px solid #eee;
+        }
+
+        .loading {
+            display: none;
+            color: #666;
+            font-style: italic;
+            padding: 8px;
+            text-align: center;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .error {
+            color: #d93025;
+            padding: 8px;
+            background-color: #fce8e6;
+            border-radius: 4px;
+            display: none;
+            margin-top: 8px;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .toolbar select {
+            padding: 4px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        .chat-history {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin-bottom: 12px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+
+        .message.user {
+            background-color: #e8f0fe;
+            margin-left: 20px;
+        }
+
+        .message.assistant {
+            background-color: #f8f9fa;
+            margin-right: 20px;
+        }
+
+        .message .header {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="input-section">
+            <label for="prompt">Введите ваш запрос:</label>
+            <textarea 
+                id="prompt" 
+                placeholder="Задайте любой вопрос о данных вашей таблицы..."
+                rows="4"
+            ></textarea>
+            <div class="button-group">
+                <button onclick="sendPrompt()" id="sendButton">Отправить</button>
+                <button onclick="clearAll()" id="clearButton" class="secondary">Очистить</button>
+            </div>
+            <div id="error" class="error"></div>
+        </div>
+
+        <div id="loading" class="loading">
+            Обработка вашего запроса...
+        </div>
+
+        <div class="output-section">
+            <div class="toolbar">
+                <label>История чата</label>
+                <select id="templateSelect" onchange="loadTemplate()">
+                    <option value="">Выберите шаблон...</option>
+                    <option value="analyze">Анализ данных</option>
+                    <option value="summarize">Сводка таблицы</option>
+                    <option value="formula">Создать формулу</option>
+                </select>
+            </div>
+            <div id="chatHistory" class="chat-history"></div>
+        </div>
+    </div>
+
+    <script>
+        // Store chat history
+        let chatHistory = [];
+
+        // Templates for common tasks
+        const templates = {
+            analyze: "Пожалуйста, проанализируйте выбранные данные и укажите:\n1. Ключевые закономерности\n2. Заметные тенденции\n3. Рекомендации",
+            summarize: "Пожалуйста, предоставьте краткую сводку данных этой таблицы, включая:\n1. Основные категории данных\n2. Ключевые выводы\n3. Возможные действия",
+            formula: "Пожалуйста, помогите создать формулу Google Таблиц для:"
+        };
+
+        // Load template into prompt
+        function loadTemplate() {
+            const template = document.getElementById('templateSelect').value;
+            if (template) {
+                document.getElementById('prompt').value = templates[template];
+                document.getElementById('templateSelect').value = '';
+            }
+        }
+
+        // Send prompt to Google Apps Script
+        function sendPrompt() {
+            const promptInput = document.getElementById('prompt');
+            const prompt = promptInput.value.trim();
+            
+            if (!prompt) {
+                showError('Пожалуйста, введите запрос');
+                return;
+            }
+
+            // Show loading state
+            setLoading(true);
+            hideError();
+            
+            // Disable buttons during processing
+            setButtonsEnabled(false);
+
+            // Add user message to chat
+            addMessageToChat('User', prompt);
+
+            // Call server-side function
+            google.script.run
+                .withSuccessHandler(handleSuccess)
+                .withFailureHandler(handleError)
+                .callOpenAI(prompt);
+        }
+
+        // Handle successful response
+        function handleSuccess(result) {
+            setLoading(false);
+            setButtonsEnabled(true);
+            addMessageToChat('Assistant', result);
+            document.getElementById('prompt').value = '';
+        }
+
+        // Handle error
+        function handleError(error) {
+            setLoading(false);
+            setButtonsEnabled(true);
+            showError(error.message || 'An error occurred');
+        }
+
+        // Add message to chat history
+        function addMessageToChat(role, content) {
+            const chatDiv = document.getElementById('chatHistory');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role.toLowerCase()}`;
+            
+            const header = document.createElement('div');
+            header.className = 'header';
+            header.textContent = role;
+            
+            const text = document.createElement('div');
+            text.className = 'content';
+            text.textContent = content;
+            
+            messageDiv.appendChild(header);
+            messageDiv.appendChild(text);
+            chatDiv.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            
+            // Store in history
+            chatHistory.push({ role, content });
+        }
+
+        // Clear all inputs and outputs
+        function clearAll() {
+            document.getElementById('prompt').value = '';
+            document.getElementById('chatHistory').innerHTML = '';
+            hideError();
+            chatHistory = [];
+        }
+
+        // Show/hide loading state
+        function setLoading(isLoading) {
+            document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
+        }
+
+        // Enable/disable buttons
+        function setButtonsEnabled(enabled) {
+            document.getElementById('sendButton').disabled = !enabled;
+            document.getElementById('clearButton').disabled = !enabled;
+        }
+
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = 'Ошибка: ' + message;
+            errorDiv.style.display = 'block';
+        }
+
+        // Hide error message
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+
+        // Handle Enter key to send prompt (Ctrl/Cmd + Enter)
+        document.getElementById('prompt').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                sendPrompt();
+            }
+        });
+    </script>
+</body>
+</html> 
